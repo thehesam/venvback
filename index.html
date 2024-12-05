@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Air Quality Chart</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        canvas {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <h1>Real-Time Air Quality Chart</h1>
+    <canvas id="airQualityChart" width="800" height="400"></canvas>
+
+    <script>
+        // Initialize the chart
+        const ctx = document.getElementById('airQualityChart').getContext('2d');
+        const airQualityChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [], // Time labels will go here
+                datasets: [
+                    {
+                        label: 'PM1.0',
+                        data: [], // PM1.0 values
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderWidth: 2,
+                        tension: 0.4, // Smooth curve
+                        fill: true,
+                    },
+                    {
+                        label: 'PM2.5',
+                        data: [], // PM2.5 values
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        borderWidth: 2,
+                        tension: 0.4, // Smooth curve
+                        fill: true,
+                    },
+                    {
+                        label: 'PM10',
+                        data: [], // PM10 values
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        borderWidth: 2,
+                        tension: 0.4, // Smooth curve
+                        fill: true,
+                    },
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        type: 'time', // Use time scale
+                        time: {
+                            unit: 'second', // Format for time scale
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time',
+                            color: '#555'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Concentration (µg/m³)',
+                            color: '#555'
+                        },
+                        suggestedMin: 0, // Minimum value is always 0
+                        suggestedMax: 20, // Maximum default value
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return value.toFixed(1); // Ensure clean display
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        labels: {
+                            color: '#333'
+                        }
+                    }
+                }
+            }
+        });
+
+        // Function to fetch data from the API
+        async function fetchSensorData() {
+            try {
+                const response = await fetch('http://localhost:5000/api/sensor');
+                const data = await response.json();
+
+                // Extract the latest data and timestamps
+                const newLabels = data.map(record => new Date(record.timestamp));
+                const pm1Data = data.map(record => parseFloat(record["PM1.0"]));
+                const pm25Data = data.map(record => parseFloat(record["PM2.5"]));
+                const pm10Data = data.map(record => parseFloat(record["PM10"]));
+
+                // Update the chart
+                airQualityChart.data.labels = newLabels;
+                airQualityChart.data.datasets[0].data = pm1Data;
+                airQualityChart.data.datasets[1].data = pm25Data;
+                airQualityChart.data.datasets[2].data = pm10Data;
+
+                // Redraw the chart
+                airQualityChart.update();
+            } catch (error) {
+                console.error('Error fetching sensor data:', error);
+            }
+        }
+
+        // Refresh the data every 5 seconds
+        setInterval(fetchSensorData, 2000);
+
+        // Fetch the initial data
+        fetchSensorData();
+    </script>
+</body>
+</html>
