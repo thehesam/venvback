@@ -1,0 +1,139 @@
+import datetime
+import boto3
+from pymongo import MongoClient
+import time
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding, hashes
+from cryptography.hazmat.backends import default_backend
+import os
+
+
+# MongoDB setup
+mongo_user = "Hesam"
+mongo_pass = "2360291"
+uri = f"mongodb+srv://{mongo_user}:{mongo_pass}@v-env.m0bml.mongodb.net/?retryWrites=true&w=majority&appName=v-env"
+
+# Setup the MongoDB client
+client = MongoClient(uri)
+db = client['air_quality_data']
+collection = db['sensor_readings_sec']
+
+kms_client = boto3.client(
+    'kms',
+    region_name=aws_region,
+    aws_access_key_id=aws_access_key_id,
+    aws_secret_access_key=aws_secret_access_key
+)
+
+def generate_key():
+    """
+    Generate a data key for encryption and return the plaintext and encrypted key.
+    """
+    key_id = 'arn:aws:kms:eu-north-1:124357064627:key/ec572c67-89d3-439c-8d9c-c5196fc2ae34'  # Replace with your actual key alias or ARN
+    response = kms_client.generate_data_key(KeyId=key_id, KeySpec='AES_256')
+    return response['Plaintext'], response['CiphertextBlob']
+
+def encrypt_data(data):
+    """
+    Encrypt data using AES in CBC mode with a KMS managed key.
+    """
+    plaintext_key, encrypted_key = generate_key()
+
+    # Generate a random IV (16 bytes for AES)
+    iv = os.urandom(16)
+
+    # Pad the data to make it block-size compatible
+    padder = padding.PKCS7(128).padder()
+    padded_data = padder.update(data.encode()) + padder.finalize()
+
+    # Create a cipher object using the plaintext data key
+    cipher = Cipher(algorithms.AES(plaintext_key), modes.CBC(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+
+    # Encrypt the data
+    ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+
+    # Return IV, ciphertext, and encrypted data key
+    return iv, ciphertext, encrypted_key
+
+
+def hash_data(data):
+    """
+    Generate a SHA-256 hash of the data.
+    """
+    digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    digest.update(data.encode())
+    return digest.finalize()
+
+
+def decrypt_data(iv, ciphertext, encrypted_key):
+    """
+    Decrypt data using AES in CBC mode with a KMS managed key.
+    """
+    # Decrypt the data key
+    plaintext_key = kms_client.decrypt(CiphertextBlob=encrypted_key)['Plaintext']
+
+    # Create a cipher object using the decrypted data key
+    cipher = Cipher(algorithms.AES(plaintext_key), modes.CBC(iv), backend=default_backend())
+    decryptor = cipher.decryptor()
+
+    # Decrypt the data
+    padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+    # Unpad the plaintext
+    unpadder = padding.PKCS7(128).unpadder()
+    plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
+
+    return plaintext.decode()
+
+def send_data_to_atlas(plaintext):
+    """
+    Function to send encrypted data and combined hash to MongoDB Atlas.
+    """
+    # Concatenate all PM values into a single string
+    #combined_data = f"{pm1},{pm25},{pm10}"
+    
+    # Encrypt data
+    encrypted_plain = encrypt_data(str(plaintext))
+
+    # Hash the combined PM data
+    #combined_hash = hash_data(combined_data)
+    hash_plain = hash_data(plaintext)
+
+    data = {
+        "encrypted_plain": encrypted_plain,
+        "combined_hash": hash_plain,
+        "timestamp": datetime.datetime.utcnow()
+    }
+    try:
+        collection.insert_one(data)
+        print("Encrypted data and combined hash posted successfully: ", data)
+    except Exception as e:
+        print("An error occurred while posting encrypted data and combined hash: ", e)
+
+
+
+# Example usage
+plaintext = "Sensitive data"
+
+iv, encrypted_data, encrypted_key = encrypt_data(plaintext)
+print("Encrypted:", encrypted_data)
+
+# Decrypting the data
+decrypted_text = decrypt_data(iv, encrypted_data, encrypted_key)
+print("Decrypted:", decrypted_text)
+
+def read_sensor_data():
+    """
+    Function to read data from the air quality sensor.
+    """
+    #values = air_mon.read()
+    #return values.pm10_cf1, values.pm25_cf1, values.pm100_cf1
+
+try:
+    while True:
+        #pm10, pm25, pm1 = read_sensor_data()
+        send_data_to_atlas(plaintext)
+        time.sleep(20)  # Send data every 5 seconds
+except KeyboardInterrupt:
+    print("Stopping the sensor data collection...")
